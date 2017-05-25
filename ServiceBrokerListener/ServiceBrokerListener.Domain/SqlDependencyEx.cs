@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Linq;
 
-namespace DurableAD.Helpers
+namespace ServiceBrokerListener.Domain
 {
     public sealed class SqlDependencyEx : IDisposable
     {
@@ -50,13 +50,9 @@ namespace DurableAD.Helpers
             {
                 get
                 {
-                    return (Data != null ? Data.Element(INSERTED_TAG) : null) != null
-                               ? (Data != null ? Data.Element(DELETED_TAG) : null) != null
-                                     ? NotificationTypes.Update
-                                     : NotificationTypes.Insert
-                               : (Data != null ? Data.Element(DELETED_TAG) : null) != null
-                                     ? NotificationTypes.Delete
-                                     : NotificationTypes.None;
+                    return Data?.Element(INSERTED_TAG) != null
+                               ? Data?.Element(DELETED_TAG) != null ? NotificationTypes.Update : NotificationTypes.Insert
+                               : Data?.Element(DELETED_TAG) != null ? NotificationTypes.Delete : NotificationTypes.None;
                 }
             }
 
@@ -451,7 +447,7 @@ namespace DurableAD.Helpers
 
         private static readonly List<int> ActiveEntities = new List<int>();
 
-        private CancellationTokenSource cts { get; set; }
+        private CancellationTokenSource _cts { get; set; }
         
         public string ConversationQueueName
         {
@@ -534,8 +530,8 @@ namespace DurableAD.Helpers
             // This situation leads to notification absence in some cases
             this.Stop();
 
-            cts = new CancellationTokenSource();
-            CancellationToken ct = cts.Token;
+            _cts = new CancellationTokenSource();
+            CancellationToken ct = _cts.Token;
 
             Task.Factory.StartNew(async () =>
             {
@@ -560,7 +556,7 @@ namespace DurableAD.Helpers
                     Active = false;
                     await OnNotificationProcessStopped();
                 }
-            }, cts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            }, _cts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
 
         public void Stop()
@@ -570,13 +566,13 @@ namespace DurableAD.Helpers
             lock (ActiveEntities)
                 if (ActiveEntities.Contains(Identity)) ActiveEntities.Remove(Identity);
 
-            if ((cts == null) || (cts.Token.IsCancellationRequested))
+            if ((_cts == null) || (_cts.Token.IsCancellationRequested))
                 return;
             
-            if (!cts.Token.CanBeCanceled)
+            if (!_cts.Token.CanBeCanceled)
                 return;
 
-            cts.Cancel();
+            _cts.Cancel();
         }
 
         public void Dispose()
@@ -606,8 +602,7 @@ namespace DurableAD.Helpers
                         result.Add(reader.GetString(0));
             }
 
-            int temp;
-            return result.Select(p => int.TryParse(p, out temp) ? temp : -1).Where(p => p != -1).ToArray();
+            return result.Select(p => int.TryParse(p, out int temp) ? temp : -1).Where(p => p != -1).ToArray();
         }
 
         public static async Task CleanDatabase(string connectionString, string database)

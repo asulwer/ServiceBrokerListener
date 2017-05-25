@@ -10,6 +10,7 @@
     using NUnit.Framework;
 
     using ServiceBrokerListener.Domain;
+    using System.Threading.Tasks;
 
     /// <summary>
     /// TODO: 
@@ -300,11 +301,7 @@
         [Test]
         public void GetActiveDbListenersTest()
         {
-            Func<int> getDbDepCount =
-                () =>
-                SqlDependencyEx.GetDependencyDbIdentities(
-                    TEST_CONNECTION_STRING,
-                    TEST_DATABASE_NAME).Length;
+            Func<Task<int>> getDbDepCount = async () => (await SqlDependencyEx.GetDependencyDbIdentities(TEST_CONNECTION_STRING,TEST_DATABASE_NAME)).Length;
 
             using (var dep1 = new SqlDependencyEx(TEST_CONNECTION_STRING, TEST_DATABASE_NAME, TEST_TABLE_NAME, "temp"
                 , identity: 4))
@@ -327,13 +324,9 @@
         }
 
         [Test]
-        public void ClearDatabaseTest()
+        public async Task ClearDatabaseTest()
         {
-            Func<int> getDbDepCount =
-                () =>
-                SqlDependencyEx.GetDependencyDbIdentities(
-                    TEST_CONNECTION_STRING,
-                    TEST_DATABASE_NAME).Length;
+            Func<Task<int>> getDbDepCount = async () => (await SqlDependencyEx.GetDependencyDbIdentities(TEST_CONNECTION_STRING, TEST_DATABASE_NAME)).Length;
 
             var dep1 = new SqlDependencyEx(
                 TEST_CONNECTION_STRING,
@@ -356,7 +349,7 @@
             Assert.AreEqual(2, getDbDepCount());
 
             // Forced db cleaning
-            SqlDependencyEx.CleanDatabase(TEST_CONNECTION_STRING, TEST_DATABASE_NAME);
+            await SqlDependencyEx.CleanDatabase(TEST_CONNECTION_STRING, TEST_DATABASE_NAME);
 
             // Make sure db has no any dependency objects.
             Assert.AreEqual(0, getDbDepCount());
@@ -388,20 +381,23 @@
                            0))
             {
 
-                sqlDependencyFirstTable.TableChanged += (sender, args) =>
+                sqlDependencyFirstTable.TableChanged += async (sender, args) =>
                 {
-                    if (args.NotificationType == SqlDependencyEx.NotificationTypes.Delete)
+                    await Task.Factory.StartNew(() =>
                     {
-                        table1DeletesReceived++;
-                        table1TotalDeleted += args.Data.Element("deleted").Elements("row").Count();
-                    }
+                        if (args.NotificationType == SqlDependencyEx.NotificationTypes.Delete)
+                        {
+                            table1DeletesReceived++;
+                            table1TotalDeleted += args.Data.Element("deleted").Elements("row").Count();
+                        }
 
-                    if (args.NotificationType == SqlDependencyEx.NotificationTypes.Insert)
-                    {
-                        table1InsertsReceived++;
-                    }
+                        if (args.NotificationType == SqlDependencyEx.NotificationTypes.Insert)
+                        {
+                            table1InsertsReceived++;
+                        }
 
-                    table1TotalNotifications++;
+                        table1TotalNotifications++;
+                    });
                 };
 
                 if (!sqlDependencyFirstTable.Active)
@@ -417,20 +413,23 @@
                                                    1))
                 {
 
-                    sqlDependencySecondTable.TableChanged += (sender, args) =>
+                    sqlDependencySecondTable.TableChanged += async (sender, args) =>
                     {
-                        if (args.NotificationType == SqlDependencyEx.NotificationTypes.Delete)
+                        await Task.Factory.StartNew(() =>
                         {
-                            table2DeletesReceived++;
-                        }
+                            if (args.NotificationType == SqlDependencyEx.NotificationTypes.Delete)
+                            {
+                                table2DeletesReceived++;
+                            }
 
-                        if (args.NotificationType == SqlDependencyEx.NotificationTypes.Insert)
-                        {
-                            table2InsertsReceived++;
-                            table2TotalInserted += args.Data.Element("inserted").Elements("row").Count();
-                        }
+                            if (args.NotificationType == SqlDependencyEx.NotificationTypes.Insert)
+                            {
+                                table2InsertsReceived++;
+                                table2TotalInserted += args.Data.Element("inserted").Elements("row").Count();
+                            }
 
-                        table2TotalNotifications++;
+                            table2TotalNotifications++;
+                        });
                     };
 
                     if (!sqlDependencySecondTable.Active)
@@ -488,19 +487,22 @@
                            0))
             {
 
-                sqlDependencyFirstTable.TableChanged += (sender, args) =>
+                sqlDependencyFirstTable.TableChanged += async (sender, args) =>
                 {
-                    if (args.NotificationType == SqlDependencyEx.NotificationTypes.Delete)
+                    await Task.Factory.StartNew(() =>
                     {
-                        table1DeletesReceived++;
-                    }
+                        if (args.NotificationType == SqlDependencyEx.NotificationTypes.Delete)
+                        {
+                            table1DeletesReceived++;
+                        }
 
-                    if (args.NotificationType == SqlDependencyEx.NotificationTypes.Insert)
-                    {
-                        table1InsertsReceived++;
-                    }
+                        if (args.NotificationType == SqlDependencyEx.NotificationTypes.Insert)
+                        {
+                            table1InsertsReceived++;
+                        }
 
-                    table1TotalNotifications++;
+                        table1TotalNotifications++;
+                    });
                 };
 
                 if (!sqlDependencyFirstTable.Active)
@@ -538,19 +540,22 @@
                            0))
             {
 
-                sqlDependencyFirstTable.TableChanged += (sender, args) =>
+                sqlDependencyFirstTable.TableChanged += async (sender, args) =>
                 {
-                    if (args.NotificationType == SqlDependencyEx.NotificationTypes.Delete)
+                    await Task.Factory.StartNew(() =>
                     {
-                        table1DeletesReceived++;
-                    }
+                        if (args.NotificationType == SqlDependencyEx.NotificationTypes.Delete)
+                        {
+                            table1DeletesReceived++;
+                        }
 
-                    if (args.NotificationType == SqlDependencyEx.NotificationTypes.Insert)
-                    {
-                        table1InsertsReceived++;
-                    }
+                        if (args.NotificationType == SqlDependencyEx.NotificationTypes.Insert)
+                        {
+                            table1InsertsReceived++;
+                        }
 
-                    table1TotalNotifications++;
+                        table1TotalNotifications++;
+                    });
                 };
 
                 if (!sqlDependencyFirstTable.Active)
@@ -588,19 +593,22 @@
                            0))
             {
 
-                sqlDependencyFirstTable.TableChanged += (sender, args) =>
+                sqlDependencyFirstTable.TableChanged += async (sender, args) =>
                 {
-                    if (args.NotificationType == SqlDependencyEx.NotificationTypes.Delete)
+                    await Task.Factory.StartNew(() =>
                     {
-                        table1DeletesReceived++;
-                    }
+                        if (args.NotificationType == SqlDependencyEx.NotificationTypes.Delete)
+                        {
+                            table1DeletesReceived++;
+                        }
 
-                    if (args.NotificationType == SqlDependencyEx.NotificationTypes.Insert)
-                    {
-                        table1InsertsReceived++;
-                    }
+                        if (args.NotificationType == SqlDependencyEx.NotificationTypes.Insert)
+                        {
+                            table1InsertsReceived++;
+                        }
 
-                    table1TotalNotifications++;
+                        table1TotalNotifications++;
+                    });
                 };
 
                 if (!sqlDependencyFirstTable.Active)
@@ -638,19 +646,22 @@
                            0))
             {
 
-                sqlDependencyFirstTable.TableChanged += (sender, args) =>
+                sqlDependencyFirstTable.TableChanged += async (sender, args) =>
                 {
-                    if (args.NotificationType == SqlDependencyEx.NotificationTypes.Delete)
+                    await Task.Factory.StartNew(() =>
                     {
-                        table1DeletesReceived++;
-                    }
+                        if (args.NotificationType == SqlDependencyEx.NotificationTypes.Delete)
+                        {
+                            table1DeletesReceived++;
+                        }
 
-                    if (args.NotificationType == SqlDependencyEx.NotificationTypes.Insert)
-                    {
-                        table1InsertsReceived++;
-                    }
+                        if (args.NotificationType == SqlDependencyEx.NotificationTypes.Insert)
+                        {
+                            table1InsertsReceived++;
+                        }
 
-                    table1TotalNotifications++;
+                        table1TotalNotifications++;
+                    });
                 };
 
                 if (!sqlDependencyFirstTable.Active)
@@ -738,7 +749,7 @@
                         TEST_DATABASE_NAME,
                         TEST_TABLE_NAME, "temp")) 
             {
-                sqlDependency.TableChanged += (o, e) => changesReceived++;
+                sqlDependency.TableChanged += async (o, e) => await Task.Factory.StartNew(() => changesReceived++);
                 sqlDependency.Start();
 
                 Thread.Sleep(changesDelayInSec * 1000);
@@ -793,21 +804,24 @@
                         TEST_DATABASE_NAME,
                         TEST_TABLE_NAME, "temp", testType))
             {
-                sqlDependency.TableChanged += (o, e) =>
+                sqlDependency.TableChanged += async (o, e) =>
                 {
-                    changesReceived++;
+                    await Task.Factory.StartNew(() =>
+                    {
+                        changesReceived++;
 
-                    if (e.Data == null) return;
+                        if (e.Data == null) return;
 
-                    var inserted = e.Data.Element("inserted");
-                    var deleted = e.Data.Element("deleted");
+                        var inserted = e.Data.Element("inserted");
+                        var deleted = e.Data.Element("deleted");
 
-                    elementsInDetailsCount += inserted != null
-                                                  ? inserted.Elements("row").Count()
-                                                  : 0;
-                    elementsInDetailsCount += deleted != null
-                                                  ? deleted.Elements("row").Count()
-                                                  : 0;
+                        elementsInDetailsCount += inserted != null
+                                                      ? inserted.Elements("row").Count()
+                                                      : 0;
+                        elementsInDetailsCount += deleted != null
+                                                      ? deleted.Elements("row").Count()
+                                                      : 0;
+                    });
                 };
                 sqlDependency.Start();
 
@@ -831,7 +845,9 @@
                         TEST_DATABASE_NAME,
                         TEST_TABLE_NAME, "temp"))
             {
-                sqlDependency.TableChanged += (o, e) =>
+                sqlDependency.TableChanged += async (o, e) =>
+                {
+                    await Task.Factory.StartNew(() =>
                     {
                         changesReceived++;
 
@@ -841,12 +857,13 @@
                         var deleted = e.Data.Element("deleted");
 
                         elementsInDetailsCount += inserted != null
-                                                      ? inserted.Elements("row").Count()
-                                                      : 0;
+                                                        ? inserted.Elements("row").Count()
+                                                        : 0;
                         elementsInDetailsCount += deleted != null
-                                                      ? deleted.Elements("row").Count()
-                                                      : 0;
-                    };
+                                                        ? deleted.Elements("row").Count()
+                                                        : 0;
+                    });
+                };
                 sqlDependency.Start();
 
                 MakeChunkedInsertDeleteUpdate(insertsCount);
@@ -871,12 +888,15 @@
                         TEST_DATABASE_NAME,
                         TEST_TABLE_NAME, "temp", receiveDetails: false))
             {
-                sqlDependency.TableChanged += (o, e) =>
+                sqlDependency.TableChanged += async (o, e) =>
                 {
-                    Assert.AreEqual(SqlDependencyEx.NotificationTypes.None, e.NotificationType);
-                    Assert.AreEqual(0, e.Data.Elements().Count());
+                    await Task.Factory.StartNew(() =>
+                    {
+                        Assert.AreEqual(SqlDependencyEx.NotificationTypes.None, e.NotificationType);
+                        Assert.AreEqual(0, e.Data.Elements().Count());
 
-                    changesReceived++;
+                        changesReceived++;
+                    });
                 };
                 sqlDependency.Start();
 
