@@ -22,9 +22,18 @@ Take a look how it works: http://sbl.azurewebsites.net
     var listener = new SqlDependencyEx(connectionString, "YourDatabase", "YourTable");
     
     // e.Data contains actual changed data in the XML format
-    listener.TableChanged += async (o, e) => await Task.Factory.StartNew(() => Console.WriteLine("Your table was changed!"));
-    listener.NotificationProcessStopped += async (o) => await Task.Factory.StartNew(() => System.Diagnostics.Debug.WriteLine("STOPPED"));
-    
+    listener.TableChanged += async (o, e) => {
+	await Task.Factory.StartNew(() => {
+	     Console.WriteLine("Your table was changed!");
+        });
+    };
+	
+    listener.NotificationProcessStopped += async (o) => {
+        await Task.Factory.StartNew(() => {
+            Console.WriteLine("NotificationProcessStopped");
+        });
+    };    
+
     // After you call the Start method you will receive table notifications with 
     // the actual changed data in the XML format
     listener.Start();
