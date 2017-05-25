@@ -1,17 +1,17 @@
-﻿using System.IO;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Data.SqlClient;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Xml;
+using System.Xml.Linq;
 
-namespace ServiceBrokerListener.Domain
+namespace DurableAD.Helpers
 {
-    using System;
-    using System.Collections.Generic;
-    using System.Data;
-    using System.Data.SqlClient;
-    using System.Linq;
-    using System.Text;
-    using System.Threading;
-    using System.Xml.Linq;
-
     public sealed class SqlDependencyEx : IDisposable
     {
         [Flags]
@@ -70,7 +70,7 @@ namespace ServiceBrokerListener.Domain
             {
                 XDocument xDocument = null;
 
-                XmlReaderSettings xmlReaderSettings = new XmlReaderSettings {CheckCharacters = false};
+                XmlReaderSettings xmlReaderSettings = new XmlReaderSettings { CheckCharacters = false };
 
                 using (var stream = new StringReader(xml))
                 using (XmlReader xmlReader = XmlReader.Create(stream, xmlReaderSettings))
@@ -451,13 +451,13 @@ namespace ServiceBrokerListener.Domain
 
         private static readonly List<int> ActiveEntities = new List<int>();
 
-        private CancellationTokenSource _threadSource;
-
+        private CancellationTokenSource cts { get; set; }
+        
         public string ConversationQueueName
         {
             get
             {
-                return string.Format("ListenerQueue_{0}", this.Identity);
+                return $"ListenerQueue_{this.Identity}";
             }
         }
 
@@ -465,7 +465,7 @@ namespace ServiceBrokerListener.Domain
         {
             get
             {
-                return string.Format("ListenerService_{0}", this.Identity);
+                return $"ListenerService_{this.Identity}";
             }
         }
 
@@ -473,7 +473,7 @@ namespace ServiceBrokerListener.Domain
         {
             get
             {
-                return string.Format("tr_Listener_{0}", this.Identity);
+                return $"tr_Listener_{this.Identity}";
             }
         }
 
@@ -481,7 +481,7 @@ namespace ServiceBrokerListener.Domain
         {
             get
             {
-                return string.Format("sp_InstallListenerNotification_{0}", this.Identity);
+                return $"sp_InstallListenerNotification_{this.Identity}";
             }
         }
 
@@ -489,7 +489,7 @@ namespace ServiceBrokerListener.Domain
         {
             get
             {
-                return string.Format("sp_UninstallListenerNotification_{0}", this.Identity);
+                return $"sp_UninstallListenerNotification_{this.Identity}";
             }
         }
 
@@ -505,26 +505,11 @@ namespace ServiceBrokerListener.Domain
 
         public bool DetailsIncluded { get; private set; }
 
-        public int Identity
-        {
-            get;
-            private set;
-        }
+        public int Identity { get; private set; }
 
         public bool Active { get; private set; }
 
-        public event EventHandler<TableChangedEventArgs> TableChanged;
-
-        public event EventHandler NotificationProcessStopped;
-
-        public SqlDependencyEx(
-            string connectionString,
-            string databaseName,
-            string tableName,
-            string schemaName = "dbo",
-            NotificationTypes listenerType =
-                NotificationTypes.Insert | NotificationTypes.Update | NotificationTypes.Delete,
-            bool receiveDetails = true, int identity = 1)
+        public SqlDependencyEx(string connectionString, string databaseName, string tableName, string schemaName = "dbo", NotificationTypes listenerType = NotificationTypes.Insert | NotificationTypes.Update | NotificationTypes.Delete, bool receiveDetails = true, int identity = 1)
         {
             this.ConnectionString = connectionString;
             this.DatabaseName = databaseName;
@@ -549,33 +534,49 @@ namespace ServiceBrokerListener.Domain
             // This situation leads to notification absence in some cases
             this.Stop();
 
-            this.InstallNotification();
+            cts = new CancellationTokenSource();
+            CancellationToken ct = cts.Token;
 
-            _threadSource = new CancellationTokenSource();
+            Task.Factory.StartNew(async () =>
+            {
+                await this.InstallNotification();
+                try
+                {
+                    while (!ct.IsCancellationRequested)
+                    {
+                        var message = await ReceiveEvent(ct);
 
-            // Pass the token to the cancelable operation.
-            ThreadPool.QueueUserWorkItem(NotificationLoop, _threadSource.Token);
+                        Active = true;
+                        if (!string.IsNullOrWhiteSpace(message))
+                            await OnTableChanged(message);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine(ex.Message);
+                }
+                finally
+                {
+                    Active = false;
+                    await OnNotificationProcessStopped();
+                }
+            }, cts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
 
         public void Stop()
         {
-            UninstallNotification();
+            Task.Factory.StartNew(async () => await UninstallNotification());
 
             lock (ActiveEntities)
                 if (ActiveEntities.Contains(Identity)) ActiveEntities.Remove(Identity);
 
-            if ((_threadSource == null) || (_threadSource.Token.IsCancellationRequested))
-            {
+            if ((cts == null) || (cts.Token.IsCancellationRequested))
                 return;
-            }
-
-            if (!_threadSource.Token.CanBeCanceled)
-            {
+            
+            if (!cts.Token.CanBeCanceled)
                 return;
-            }
 
-            _threadSource.Cancel();
-            _threadSource.Dispose();
+            cts.Cancel();
         }
 
         public void Dispose()
@@ -583,83 +584,59 @@ namespace ServiceBrokerListener.Domain
             Stop();
         }
 
-        public static int[] GetDependencyDbIdentities(string connectionString, string database)
+        public static async Task<int[]> GetDependencyDbIdentities(string connectionString, string database)
         {
             if (connectionString == null)
-            {
                 throw new ArgumentNullException("connectionString");
-            }
-
+            
             if (database == null)
-            {
                 throw new ArgumentNullException("database");
-            }
-
+            
             List<string> result = new List<string>();
 
             using (SqlConnection connection = new SqlConnection(connectionString))
             using (SqlCommand command = connection.CreateCommand())
             {
-                connection.Open();
+                await connection.OpenAsync();
                 command.CommandText = string.Format(SQL_FORMAT_GET_DEPENDENCY_IDENTITIES, database);
                 command.CommandType = CommandType.Text;
-                using (SqlDataReader reader = command.ExecuteReader())
-                    while (reader.Read())
+
+                using (SqlDataReader reader = await command.ExecuteReaderAsync())
+                    while (await reader.ReadAsync())
                         result.Add(reader.GetString(0));
             }
 
             int temp;
-            return
-                result.Select(p => int.TryParse(p, out temp) ? temp : -1)
-                    .Where(p => p != -1)
-                    .ToArray();
+            return result.Select(p => int.TryParse(p, out temp) ? temp : -1).Where(p => p != -1).ToArray();
         }
 
-        public static void CleanDatabase(string connectionString, string database)
+        public static async Task CleanDatabase(string connectionString, string database)
         {
-            ExecuteNonQuery(
-                string.Format(SQL_FORMAT_FORCED_DATABASE_CLEANING, database),
-                connectionString);
+            await ExecuteNonQuery(string.Format(SQL_FORMAT_FORCED_DATABASE_CLEANING, database),connectionString);
         }
-
-        private void NotificationLoop(object input)
+        
+        private static async Task ExecuteNonQuery(string commandText, string connectionString)
         {
             try
             {
-                while (true)
+                using (SqlConnection conn = new SqlConnection(connectionString))
+                using (SqlCommand command = new SqlCommand(commandText, conn))
                 {
-                    var message = ReceiveEvent();
-                    Active = true;
-                    if (!string.IsNullOrWhiteSpace(message))
-                    {
-                        OnTableChanged(message);
-                    }
+                    await conn.OpenAsync();
+                    command.CommandType = CommandType.Text;
+                    await command.ExecuteNonQueryAsync();
                 }
             }
-            catch
+            catch(Exception ex)
             {
-                // ignored
-            }
-            finally
-            {
-                Active = false;
-                OnNotificationProcessStopped();
+                System.Diagnostics.Debug.WriteLine(ex.Message);
             }
         }
 
-        private static void ExecuteNonQuery(string commandText, string connectionString)
+        private async Task<string> ReceiveEvent(CancellationToken ct)
         {
-            using (SqlConnection conn = new SqlConnection(connectionString))
-            using (SqlCommand command = new SqlCommand(commandText, conn))
-            {
-                conn.Open();
-                command.CommandType = CommandType.Text;
-                command.ExecuteNonQuery();
-            }
-        }
+            string res = string.Empty;
 
-        private string ReceiveEvent()
-        {
             var commandText = string.Format(
                 SQL_FORMAT_RECEIVE_EVENT,
                 this.DatabaseName,
@@ -670,16 +647,19 @@ namespace ServiceBrokerListener.Domain
             using (SqlConnection conn = new SqlConnection(this.ConnectionString))
             using (SqlCommand command = new SqlCommand(commandText, conn))
             {
-                conn.Open();
+                await conn.OpenAsync(ct);
                 command.CommandType = CommandType.Text;
                 command.CommandTimeout = COMMAND_TIMEOUT;
-                using (var reader = command.ExecuteReader())
+                using (var reader = await command.ExecuteReaderAsync(ct))
                 {
-                    if (!reader.Read() || reader.IsDBNull(0)) return string.Empty;
-
-                    return reader.GetString(0);
+                    if (!await reader.ReadAsync(ct) || await reader.IsDBNullAsync(0, ct))
+                        res = string.Empty;
+                    else
+                        res = reader.GetString(0);
                 }
             }
+            
+            return res;
         }
 
         private string GetUninstallNotificationProcedureScript()
@@ -754,42 +734,44 @@ namespace ServiceBrokerListener.Domain
             return result.ToString();
         }
 
-        private void UninstallNotification()
+        private async Task UninstallNotification()
         {
             string execUninstallationProcedureScript = string.Format(
                 SQL_FORMAT_EXECUTE_PROCEDURE,
                 this.DatabaseName,
                 this.UninstallListenerProcedureName,
                 this.SchemaName);
-            ExecuteNonQuery(execUninstallationProcedureScript, this.ConnectionString);
+            await ExecuteNonQuery(execUninstallationProcedureScript, this.ConnectionString);
         }
 
-        private void InstallNotification()
+        private async Task InstallNotification()
         {
             string execInstallationProcedureScript = string.Format(
                 SQL_FORMAT_EXECUTE_PROCEDURE,
                 this.DatabaseName,
                 this.InstallListenerProcedureName,
                 this.SchemaName);
-            ExecuteNonQuery(GetInstallNotificationProcedureScript(), this.ConnectionString);
-            ExecuteNonQuery(GetUninstallNotificationProcedureScript(), this.ConnectionString);
-            ExecuteNonQuery(execInstallationProcedureScript, this.ConnectionString);
+            await ExecuteNonQuery(GetInstallNotificationProcedureScript(), this.ConnectionString);
+            await ExecuteNonQuery(GetUninstallNotificationProcedureScript(), this.ConnectionString);
+            await ExecuteNonQuery(execInstallationProcedureScript, this.ConnectionString);
         }
 
-        private void OnTableChanged(string message)
+        public event Func<object,TableChangedEventArgs, Task> TableChanged;
+        private async Task OnTableChanged(string message)
         {
-            var evnt = this.TableChanged;
+            Func<object,TableChangedEventArgs,Task> evnt = this.TableChanged;
             if (evnt == null) return;
 
-            evnt.Invoke(this, new TableChangedEventArgs(message));
+            await evnt.Invoke(this, new TableChangedEventArgs(message));
         }
 
-        private void OnNotificationProcessStopped()
+        public event Func<object,Task> NotificationProcessStopped;
+        private async Task OnNotificationProcessStopped()
         {
-            var evnt = NotificationProcessStopped;
+            Func<object,Task> evnt = NotificationProcessStopped;
             if (evnt == null) return;
 
-            evnt.BeginInvoke(this, EventArgs.Empty, null, null);
+            await evnt.Invoke(this);
         }
     }
 }
