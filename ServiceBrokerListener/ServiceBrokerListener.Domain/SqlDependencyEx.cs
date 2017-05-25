@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Linq;
 
-namespace DurableAD.Helpers
+namespace ServiceBrokerListener.Domain
 {
     public sealed class SqlDependencyEx : IDisposable
     {
